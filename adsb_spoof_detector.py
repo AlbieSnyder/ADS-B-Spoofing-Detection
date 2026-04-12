@@ -1,5 +1,7 @@
 from geopy.distance import geodesic
 import math
+import threading
+import time
 
 
 #CONSTANTS
@@ -41,7 +43,7 @@ class PositionReport:
     lat: float # degrees
     lon: float # degrees
     altitude_ft: float #ft
-    ground_speek_kt: float #knots
+    ground_speed_kt: float #knots
     heading: float
     vertical_rate_fpm: float #ft per minute
     timestamp: float
@@ -99,3 +101,116 @@ def max_line_of_sight_nm(alt_ft: float, receiver_alt_ft: float = 0) -> float:
     alt_m = alt_ft * FT_TO_M
     rx_m = receiver_alt_ft * FT_TO_M
     return 1.23 * (math.sqrt(max(alt_ft, 0)) + math.sqrt(max(receiver_alt_ft, 0)))
+
+#Detection Checks
+
+class SpoofDetector:
+
+    def __init__(self, receiver_lat: float, receiver_lon: float, receiver_alt_ft: float = 0.0):
+        self.rx_lat = receiver_lat
+        self.rx_lon = receiver_lon
+        self.rx_alt = receiver_alt_ft
+        self.tracks: dict[str, AircraftTrack] = {}
+        self.stats = {
+            "messages_processed": 0,
+            "geometry_alerts": 0,
+            "trajectory_alerts": 0,
+            "timing_alerts": 0,
+            "total_spoofed": 0,
+        }
+        self.lock = threading.Lock()
+
+    def get_or_create_track(self, icao: str) -> AircraftTrack:
+        if icao not in self.tracks:
+            self.tracks[icao] = AircraftTrack(icao=icao)
+        return self.tracks[icao]
+    
+    def purge_stale_tracks(self):
+        """Remove tracks old tracks"""
+        now = time.time()
+        stale = [k for k, v in self.tracks.items()
+                 if now - v.last_update > STALE_TRACK_TIMEOUT_S]
+        for k in stale:
+            del self.tracks[k]
+
+    # GPS-Based Geometry Checks
+
+    def check_geometry(self, track: AircraftTrack, report: PositionReport):
+        """Check if reported position is plausible relative to the receiver's location"""
+        #Basic coordinate check
+        if not (-90 <= report.lat <= 90 and -180 <= report.lon <= 180):
+            track.flag(f"Invalid coordinates ({report.lat:.4f}, {report.lon:.4f})", 100)
+            self.stats["geometry_alerts"] += 1
+            return
+        
+        #Altitude check
+        if report.altitude_ft < -1000 or report.altitude_ft > MAX_ALTITUDE_FT:
+            track.flag(f"Implausible altitude: {report.altitude_ft:.0f} ft", 40)
+            self.stats["geometry_alerts"] += 1
+
+        #Range check
+        dist_nm = geodesic_nm(self.rx_lat, self.rx_lon, report.lat, report.lon)
+        if dist_nm > MAX_RANGE_NM:
+            track.flag(f"Beyond max range: {dist_nm:.1f} NM (limit {MAX_RANGE_NM} NM)", 30)
+            self.stats["geometry_alerts"] += 1
+
+        #LoS Check
+        los_nm = max_line_of_sight_nm(report.altitude_ft, self.rx_alt)
+        if dist_nm > los_nm * 1.2:  # 20 % margin because this isn't an exact thing I think
+            track.flag(f"Beyond line-of-sight: {dist_nm:.1f} NM (LoS limit ~{los_nm:.1f} NM at {report.altitude_ft:.0f} ft)", 25)
+            self.stats["geometry_alerts"] += 1
+
+        #Groundspeed Check
+        if report.ground_speed_kt > MAX_SPEED_KT:
+            track.flag(f"Implausible speed: {report.ground_speed_kt:.0f} kt", 30)
+            self.stats["geometry_alerts"] += 1
+
+    #Trajectory Checks
+
+    def check_trajectory(self, track: AircraftTrack, report: PositionReport):
+        """Check if successsive position reports follow a realistic trajectory"""
+
+        prev = track.prev
+        if prev is None:
+            return
+        
+        dt = report.timestamp - prev.timestamp
+        if dt <= 0:
+            return # same-time messages handled elsewhere by timing check
+        
+        #position jump check
+        dist_nm = geodesic_nm(prev.lat, prev.lon, report.lat, report.lon)
+        implied_speed_kt = (dist_nm / dt) * 3600 #NM/s to knots
+
+        if implied_speed_kt > MAX_SPEED_KT * 1.5:
+            track.flag(f"Position jump implies {implied_speed_kt:.0f} kt (moved {dist_nm:.2f} NM in {dt:.2f}s)", 35)
+            self.stats["trajectory_alerts"] += 1
+
+        #Acceleration check
+        if prev.ground_speed_kt > 0 and report.ground_speed_kt > 0:
+            accel = abs(report.ground_speed_kt - prev.ground_speed_kt)
+            if accel > MAX_ACCEL_KT_PER_S:
+                track.flag(f"Impossible acceleration: {accel:.1f} kt/s", 20)
+                self.stats["trajectory_alerts"] += 1
+
+        #Altitute Rate Check
+        alt_change = abs(report.altitude_ft - prev.altitude_ft)
+        alt_rate_fpm = (alt_change / dt) * 60
+        if alt_rate_fpm > MAX_ALT_RATE_FPM:
+            track.flag(f"Excessive climb/descent: {alt_rate_fpm:.0f} fpm", 25)
+            self.stats["trajectory_alerts"] += 1
+
+        #Heading check (basically the plane can't do a 180)
+        if prev.heading >= 0 and report.heading >= 0:
+            hdg_change = abs(heading_diff(prev.heading, report.heading))
+            hdg_rate = hdg_change / dt  # degrees/second
+            if hdg_rate > MAX_HEADING_RATE_DEG_S:
+                track.flag(f"Abrupt heading change: {hdg_rate:.1f} °/s ({hdg_change:.1f}° in {dt:.2f}s)", 20)
+                self.stats["trajectory_alerts"] += 1
+
+        #Cross-Check (reported speed vs calculated speed)
+        if report.ground_speed_kt > 50:  # only meaningful at flying speeds
+            speed_ratio = implied_speed_kt / report.ground_speed_kt
+            if speed_ratio > 2.5 or speed_ratio < 0.2:
+                track.flag(f"Speed inconsistency: reported {report.ground_speed_kt:.0f} kt but implied {implied_speed_kt:.0f} kt", 25)
+                self.stats["trajectory_alerts"] += 1
