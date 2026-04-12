@@ -319,7 +319,7 @@ Examples:
     if args.list:
         print("\nAvailable scenarios:\n")
         for name, fn in SCENARIOS.items():
-            print(f"  {name:15s} — {fn.__doc__.strip().splitlines()[0]}")
+            print(f"  {name:15s} — {(fn.__doc__ or '').strip().splitlines()[0]}")
         print()
         sys.exit(0)
 
