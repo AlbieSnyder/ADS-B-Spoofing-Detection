@@ -337,7 +337,7 @@ class SpoofDetector:
                 },
             }
 
-#  NETWORK INPUT — CONNECT TO dump1090
+#  Network input to connect to dump1090
 
 def stream_from_dump1090(host: str, port: int, detector: SpoofDetector,
                          logger: logging.Logger):
