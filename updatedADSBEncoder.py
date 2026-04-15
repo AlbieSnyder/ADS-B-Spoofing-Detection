@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 
 ##########################################################################
@@ -263,21 +263,16 @@ def manchester_encode(byte):
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import numpy
-#from scipy.signal import hilbert
 
 def df17_pos_rep_encode(ca, icao, tc, ss, nicsb, alt, time, lat, lon, surface):
 
     format = 17
 
     enc_alt =    encode_alt_modes(alt, surface)
-    #print("Alt(%r): %X " % (surface, enc_alt))
 
     #encode that position
     (evenenclat, evenenclon) = cpr_encode(lat, lon, False, surface)
     (oddenclat, oddenclon)   = cpr_encode(lat, lon, True, surface)
-
-    #print("Even Lat/Lon: %X/%X " % (evenenclat, evenenclon))
-    #print("Odd  Lat/Lon: %X/%X " % (oddenclat, oddenclon))
 
     ff = 0
     df17_even_bytes = []
@@ -295,7 +290,6 @@ def df17_pos_rep_encode(ca, icao, tc, ss, nicsb, alt, time, lat, lon, surface):
     df17_even_bytes.append((evenenclon   ) & 0xff)
 
     df17_str = "{0:02x}{1:02x}{2:02x}{3:02x}{4:02x}{5:02x}{6:02x}{7:02x}{8:02x}{9:02x}{10:02x}".format(*df17_even_bytes[0:11])
-    #print(df17_str , "%X" % bin2int(crc(df17_str+"000000", encode=True)) , "%X" % get_parity(hex2bin(df17_str+"000000"), extended=True))
     df17_crc = bin2int(crc(df17_str+"000000", encode=True))
 
     df17_even_bytes.append((df17_crc>>16) & 0xff)
@@ -336,7 +330,10 @@ def frame_1090es_ppm_modulate(even, odd):
     ppm.append( 0x40 )
     
     for i in range(len(even)):
-        word16 = numpy.packbits(manchester_encode(~even[i]))
+        # Python 3 fix: ~ on a Python 3 int produces an arbitrary-precision
+        # negative number (e.g. ~0x8D = -142), not a byte complement.
+        # Mask with 0xFF to get the unsigned 8-bit complement.
+        word16 = numpy.packbits(manchester_encode(~even[i] & 0xFF))
         ppm.append(word16[0])
         ppm.append(word16[1])
 
@@ -348,34 +345,17 @@ def frame_1090es_ppm_modulate(even, odd):
     ppm.append( 0x40 )
 
     for i in range(len(odd)):
-        word16 = numpy.packbits(manchester_encode(~odd[i]))
+        # Python 3 fix: mask bitwise NOT to unsigned byte
+        word16 = numpy.packbits(manchester_encode(~odd[i] & 0xFF))
         ppm.append(word16[0])
         ppm.append(word16[1])
 
     for i in range(48):    # pause
         ppm.append( 0 )
 
-    #print('[{}]'.format(', '.join(hex(x) for x in ppm)))
-    
     return bytearray(ppm)
 
 def hackrf_raw_IQ_format(ppm):
-    """
-    real_signal = []
-    bits = numpy.unpackbits(numpy.asarray(ppm, dtype=numpy.uint8))
-    for bit in bits:
-        if bit == 1:
-            I = 127
-        else:
-            I = 0
-        real_signal.append(I)
-
-    analytic_signal = hilbert(real_signal)
-
-    #for i in range(len(real_signal)):
-    #    print(i, real_signal[i], int(analytic_signal[i]))
-    """
-
     signal = []
     bits = numpy.unpackbits(numpy.asarray(ppm, dtype=numpy.uint8))
     for bit in bits:
@@ -417,13 +397,7 @@ if __name__ == "__main__":
 
     (df17_even, df17_odd) = df17_pos_rep_encode(ca, icao, tc, ss, nicsb, alt, time, lat, lon, surface)
 
-    #print(''.join(format(x, '02x') for x in df17_even))
-    #print(''.join(format(x, '02x') for x in df17_odd))
-
     df17_array = frame_1090es_ppm_modulate(df17_even, df17_odd)
-
-    #OutFile = open("filename.bin", "wb")
-    #OutFile.write(df17_array)
 
     samples_array = hackrf_raw_IQ_format(df17_array)
 

@@ -2,6 +2,7 @@
 """
 ADS-B Demo Traffic Generator
 ==============================
+CSEC-569/669 Wireless Security — Final Phase
 
 Generates IQ sample files for HackRF transmission using the ADS-B encoder.
 Produces multiple scenarios (legitimate flight, ghost aircraft, replay
@@ -26,6 +27,11 @@ Usage:
 
 Requirements:
     Python 3.8+, numpy, updatedADSBEncoder.py in the same directory
+
+Regulatory Notice:
+    ALL TRANSMISSIONS MUST BE PERFORMED IN A PHYSICALLY ISOLATED
+    (SHIELDED) LAB ENVIRONMENT. Transmitting spoofed ADS-B over the
+    air is a federal offense. Coordinate with your instructor or TA.
 """
 
 from __future__ import annotations
@@ -46,7 +52,10 @@ from updatedADSBEncoder import (
 )
 from geolocation import get_location
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  ENCODER HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # Default ADS-B message parameters
 CA = 5        # capability (airborne with alert)
@@ -127,7 +136,10 @@ def linear_flight_path(start_lat: float, start_lon: float,
 
     return waypoints
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  SCENARIOS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def scenario_legitimate(rx_lat: float, rx_lon: float) -> tuple[str, str, bytearray]:
     """
@@ -282,7 +294,9 @@ SCENARIOS = {
 }
 
 
-#Entry
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENTRY POINT
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(
@@ -343,20 +357,28 @@ Examples:
     else:
         to_generate = SCENARIOS
 
+    print("╔══════════════════════════════════════════════════════════╗")
+    print("║       ADS-B Demo Traffic Generator                     ║")
+    print("║       CSEC-569/669 Wireless Security — Final Phase     ║")
+    print("╚══════════════════════════════════════════════════════════╝")
+    print()
     print(f"  Receiver reference: ({rx_lat:.4f}, {rx_lon:.4f}) [{loc_source}]")
     print(f"  Output directory:   {args.outdir}/")
     print()
-    print("WARNING: Only transmit in a shielded/isolated lab")
+    print("  ⚠  WARNING: Only transmit in a shielded/isolated lab!")
     print()
 
     for name, fn in to_generate.items():
         filename, description, samples = fn(rx_lat, rx_lon)
         filepath = os.path.join(args.outdir, filename)
 
+        # Pad with 252 KB of zeros at the start (63 × 4 KB) so the
+        # file is 256 KB-aligned for HackRF transfer.
+        padding = bytearray(63 * 4096)
         with open(filepath, "wb") as f:
-            f.write(samples)
+            f.write(padding + samples)
 
-        size_kb = len(samples) / 1024
+        size_kb = (len(padding) + len(samples)) / 1024
         print(f"  ✓ {filename:30s} ({size_kb:7.1f} KB)")
         print(f"    {description}")
         print()
