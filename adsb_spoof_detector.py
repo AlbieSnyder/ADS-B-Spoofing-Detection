@@ -196,15 +196,17 @@ class SpoofDetector:
         # 2a. Positional jump
         dist_nm = geodesic_nm(prev.lat, prev.lon, report.lat, report.lon)
         implied_speed_kt = (dist_nm / dt) * 3600  # NM/s → kt
-
-        # Only flags if implied speed is dramatically beyond max plausible.
-        # Uses a higher multiplier (3x) to avoid false positives from SBS timing jitter and position update batching.
-        # Scale penalty by severity, a 100 NM teleport scores much higher than a small overshoot.
-        if implied_speed_kt > MAX_SPEED_KT * 3:
-            severity = min(implied_speed_kt / (MAX_SPEED_KT * 3), 10)
-            score = 35 * severity
-            track.flag(f"Position jump implies {implied_speed_kt:.0f} kt (moved {dist_nm:.2f} NM in {dt:.2f}s)", score)
-            self.stats["trajectory_alerts"] += 1
+ 
+        # Find the time since the last DIFFERENT position — if dump1090
+        # sent cached duplicates, the real gap is longer than dt.
+        effective_dt = dt
+        for older in reversed(track.reports[:-2]):
+            older_dist = geodesic_nm(older.lat, older.lon, report.lat, report.lon)
+            if abs(older_dist - dist_nm) < 0.01:
+                # Same position as prev, extend the effective gap
+                effective_dt = report.timestamp - older.timestamp
+            else:
+                break
 
         # 2b. Acceleration check (only when speed is actually reported)
         if prev.ground_speed_kt > 0 and report.ground_speed_kt > 0:
@@ -268,14 +270,14 @@ class SpoofDetector:
                     self.stats["timing_alerts"] += 1
 
         # 3c. Staleness / replay gap detection
-        if dt > MAX_REPLAY_STALENESS_S:
-            # Long gap followed by a position that doesn't make sense given the elapsed time could indicate a replay
-            dist_nm = geodesic_nm(prev.lat, prev.lon, report.lat, report.lon)
-            expected_max_dist = (MAX_SPEED_KT / 3600) * dt  #in NM
-            if dist_nm < expected_max_dist * 0.01 and dt > 10:
-                track.flag(f"Possible replay: {dt:.1f}s gap but position barely moved ({dist_nm:.3f} NM)", 30)
-                self.stats["timing_alerts"] += 1
-
+            if dt > MAX_REPLAY_STALENESS_S and len(track.reports) >= 4:
+                # Long gap followed by a position that doesn't make sense given the elapsed time could indicate a replay
+                dist_nm = geodesic_nm(prev.lat, prev.lon, report.lat, report.lon)
+                # A real aircraft at even 100 kt would move noticeably in 10+ seconds.
+                # Flag only if position is essentially identical (within GPS noise).
+                if dist_nm < 0.01 and dt > 10:
+                    track.flag(f"Possible replay: {dt:.1f}s gap but position barely moved ({dist_nm:.3f} NM)", 30)
+                    self.stats["timing_alerts"] += 1
     #Main Processing
 
     def process_report(self, report: PositionReport) -> AircraftTrack:
