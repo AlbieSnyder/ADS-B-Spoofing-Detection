@@ -1,2 +1,8 @@
 /__pycache__
 desktop.ini
+/demo_samples/*all*.iq8s
+/demo_samples_unsigned/*all*.iq8s
+/demo_samples/all.iq8s
+all.iq8s
+all_unsigned.iq8s
+demo_samples_unsigned/all_unsigned.iq8s
