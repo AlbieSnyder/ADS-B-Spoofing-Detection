@@ -1,5 +1,6 @@
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
 @dataclass
 class PositionReport:
@@ -32,6 +33,18 @@ def parse_sbs_line(line: str) -> PositionReport | None:
         icao = parts[4].strip().upper()
         if not icao or len(icao) != 6:
             return None
+
+        # Extract time from fields 6 (Date) and 7 (Time)
+        date_str = parts[6].strip()
+        time_str = parts[7].strip()
+        
+        try:
+            # Parse the generation date/time from the SBS message
+            dt_obj = datetime.strptime(f"{date_str} {time_str}", "%Y/%m/%d %H:%M:%S.%f")
+            msg_timestamp = dt_obj.timestamp()
+        except ValueError:
+            # Fallback to current system time if parsing fails
+            msg_timestamp = time.time()
  
         # Extract fields (empty strings become 0 / defaults)
         callsign = parts[10].strip()
@@ -65,7 +78,7 @@ def parse_sbs_line(line: str) -> PositionReport | None:
             ground_speed_kt=ground_speed,
             heading=heading,
             vertical_rate_fpm=vertical_rate,
-            timestamp=time.time(),
+            timestamp=msg_timestamp,  # Using the extracted timestamp!
             raw_line=line.strip(),
         )
  
