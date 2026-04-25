@@ -79,20 +79,19 @@ def encode_position(icao: int, lat: float, lon: float, alt: float) -> bytearray:
 
 
 def build_flight_samples(icao: int, waypoints: list[dict],
-                         pause_samples: int = 200000) -> bytearray:
+                         pause_samples: int = 1000000) -> bytearray:
     """
     Build a continuous IQ sample stream from a list of waypoints.
 
     Each waypoint is a dict with keys: lat, lon, alt.
-    A pause (silence) is inserted between each transmission to
-    simulate the ~0.5s ADS-B update interval at 2 Msps.
+    A pause (silence) is inserted between each transmission.
+    At 2 Msps, 1,000,000 sample pairs = 0.5s — matching the
+    real ADS-B update interval.
 
     Args:
         icao: 24-bit ICAO address as integer
         waypoints: list of position dicts
         pause_samples: number of zero I/Q sample pairs between messages
-                       (at 2 Msps, 200000 pairs ≈ 0.1s — the HackRF
-                        replay rate controls actual timing)
     """
     all_samples = bytearray()
     silence = bytearray(pause_samples * 2)  # 2 bytes per sample (I + Q)
@@ -154,7 +153,7 @@ def scenario_legitimate(rx_lat: float, rx_lon: float) -> tuple[str, str, bytearr
         heading_deg=45,
         speed_kt=450,
         alt=35000,
-        duration_s=30,
+        duration_s=60,
         interval_s=0.5,
     )
     samples = build_flight_samples(icao, waypoints)
@@ -180,7 +179,7 @@ def scenario_ghost(rx_lat: float, rx_lon: float) -> tuple[str, str, bytearray]:
         heading_deg=90,
         speed_kt=400,
         alt=28000,
-        duration_s=10,
+        duration_s=20,
         interval_s=0.5,
     )
 
@@ -191,7 +190,7 @@ def scenario_ghost(rx_lat: float, rx_lon: float) -> tuple[str, str, bytearray]:
         heading_deg=90,
         speed_kt=400,
         alt=28000,
-        duration_s=10,
+        duration_s=20,
         interval_s=0.5,
     )
 
@@ -218,10 +217,10 @@ def scenario_replay(rx_lat: float, rx_lon: float) -> tuple[str, str, bytearray]:
         "lon": rx_lon - 0.2,
         "alt": 31000,
     }
-    waypoints = [replayed_pos] * 30  # 30 identical messages
+    waypoints = [replayed_pos] * 60  # 60 identical messages
 
-    # Use a shorter pause to simulate rapid-fire replay
-    samples = build_flight_samples(icao, waypoints, pause_samples=50000)
+    # Use same pause as other scenarios
+    samples = build_flight_samples(icao, waypoints)
     return (
         "03_replay_attack.iq8s",
         "Replay attack (ICAO BEEF42) — same position repeated 30 times in rapid succession. Should trigger SPOOFED.",
@@ -242,7 +241,7 @@ def scenario_impossible(rx_lat: float, rx_lon: float) -> tuple[str, str, bytearr
     base_lon = rx_lon
 
     # Altitude oscillates wildly between updates
-    for i in range(20):
+    for i in range(40):
         alt = 55000 if i % 2 == 0 else 5000
         waypoints.append({
             "lat": base_lat + i * 0.001,
@@ -273,7 +272,7 @@ def scenario_far_away(rx_lat: float, rx_lon: float) -> tuple[str, str, bytearray
         heading_deg=45,
         speed_kt=250,
         alt=5000,
-        duration_s=15,
+        duration_s=30,
         interval_s=0.5,
     )
 
@@ -372,23 +371,20 @@ Examples:
         filename, description, samples = fn(rx_lat, rx_lon)
         filepath = os.path.join(args.outdir, filename)
 
-        # Pad with 252 KB of zeros at the start (63 × 4 KB) so the
-        # file is 256 KB-aligned for HackRF transfer.
-        padding = bytearray(63 * 4096)
         with open(filepath, "wb") as f:
-            f.write(padding + samples)
+            f.write(samples)
 
-        size_kb = (len(padding) + len(samples)) / 1024
+        size_kb = len(samples) / 1024
         print(f"  ✓ {filename:30s} ({size_kb:7.1f} KB)")
         print(f"    {description}")
         print()
 
     print("─" * 60)
-    print("  Transmit with:")
-    print(f"    hackrf_transfer -t {args.outdir}/<file>.iq8s -f 1090000000 -s 2000000 -x 40")
+    print("  Transmit with (loop with -R):")
+    print(f"    hackrf_transfer -t {args.outdir}/<file>.iq8s -f 1090000000 -s 2000000 -x 40 -R")
     print()
     print("  Detect with (on the RX machine):")
-    print(f"    ./dump1090 --net --interactive")
+    print(f"    ./dump1090 --dev-hackrf --net")
     print(f"    python3 adsb_spoof_detector.py")
     print("─" * 60)
 
