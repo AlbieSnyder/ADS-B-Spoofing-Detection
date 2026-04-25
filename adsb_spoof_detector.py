@@ -131,6 +131,7 @@ class SpoofDetector:
             "total_spoofed": 0,
         }
         self.lock = threading.Lock()
+        self.latest_sim_time = 0.0
 
     def get_or_create_track(self, icao: str) -> AircraftTrack:
         if icao not in self.tracks:
@@ -139,7 +140,7 @@ class SpoofDetector:
 
     def purge_stale_tracks(self):
         """Remove tracks that have not been updated recently."""
-        now = time.time()
+        now = self.latest_sim_time if self.latest_sim_time > 0 else time.time()
         stale = [k for k, v in self.tracks.items()
                  if now - v.last_update > STALE_TRACK_TIMEOUT_S]
         for k in stale:
@@ -285,6 +286,10 @@ class SpoofDetector:
         Run all three detection layers on an incoming position report.
         Returns the updated aircraft track with anomaly scoring.
         """
+
+        if report.timestamp > self.latest_sim_time:
+            self.latest_sim_time = report.timestamp
+
         with self.lock:
             self.stats["messages_processed"] += 1
             track = self.get_or_create_track(report.icao)
