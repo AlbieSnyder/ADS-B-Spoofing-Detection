@@ -1,38 +1,4 @@
 #!/usr/bin/env python3
-"""
-ADS-B Demo Traffic Generator
-==============================
-CSEC-569/669 Wireless Security — Final Phase
-
-Generates IQ sample files for HackRF transmission using the ADS-B encoder.
-Produces multiple scenarios (legitimate flight, ghost aircraft, replay
-attack, impossible parameters, beyond line-of-sight) as separate .iq8s
-files that the TX operator can broadcast one at a time.
-
-The RX operator runs dump1090 + adsb_spoof_detector.py simultaneously
-to demonstrate detection of each attack type.
-
-Usage:
-    # Generate all scenario files into an output directory:
-    python3 demo_traffic_gen.py --lat 43.0846 --lon -77.6743 --outdir demo_samples
-
-    # Generate a single scenario:
-    python3 demo_traffic_gen.py --lat 43.0846 --lon -77.6743 --scenario ghost
-
-    # List available scenarios:
-    python3 demo_traffic_gen.py --list
-
-    # Transmit a generated file with HackRF (1090 MHz, 2M samples/s):
-    hackrf_transfer -t demo_samples/01_legitimate.iq8s -f 1090000000 -s 2000000 -x 40
-
-Requirements:
-    Python 3.8+, numpy, updatedADSBEncoder.py in the same directory
-
-Regulatory Notice:
-    ALL TRANSMISSIONS MUST BE PERFORMED IN A PHYSICALLY ISOLATED
-    (SHIELDED) LAB ENVIRONMENT. Transmitting spoofed ADS-B over the
-    air is a federal offense. Coordinate with your instructor or TA.
-"""
 
 from __future__ import annotations
 
@@ -53,9 +19,6 @@ from updatedADSBEncoder import (
 from geolocation import get_location
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ENCODER HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
 
 # Default ADS-B message parameters
 CA = 5        # capability (airborne with alert)
@@ -135,10 +98,7 @@ def linear_flight_path(start_lat: float, start_lon: float,
 
     return waypoints
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  SCENARIOS
-# ═══════════════════════════════════════════════════════════════════════════════
+#Scenarios
 
 def scenario_legitimate(rx_lat: float, rx_lon: float) -> tuple[str, str, bytearray]:
     """
@@ -292,11 +252,6 @@ SCENARIOS = {
     "far": scenario_far_away,
 }
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def main():
     parser = argparse.ArgumentParser(
         description="ADS-B Demo Traffic Generator — produces IQ sample files for HackRF transmission",
@@ -312,7 +267,7 @@ Examples:
   # Generate one scenario:
   python3 demo_traffic_gen.py --scenario ghost
 
-  # Transmit with HackRF (in shielded lab only!):
+  # Transmit with HackRF:
   hackrf_transfer -t demo_samples/02_ghost_aircraft.iq8s -f 1090000000 -s 2000000 -x 40
         """,
     )
@@ -357,14 +312,13 @@ Examples:
         to_generate = SCENARIOS
 
     print("╔══════════════════════════════════════════════════════════╗")
-    print("║       ADS-B Demo Traffic Generator                     ║")
-    print("║       CSEC-569/669 Wireless Security — Final Phase     ║")
+    print("║       ADS-B Demo Traffic Generator                       ║")
     print("╚══════════════════════════════════════════════════════════╝")
     print()
     print(f"  Receiver reference: ({rx_lat:.4f}, {rx_lon:.4f}) [{loc_source}]")
     print(f"  Output directory:   {args.outdir}/")
     print()
-    print("  ⚠  WARNING: Only transmit in a shielded/isolated lab!")
+    print("WARNING: Only transmit in a shielded/isolated lab")
     print()
 
     for name, fn in to_generate.items():
